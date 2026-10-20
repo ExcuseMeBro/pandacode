@@ -84,6 +84,7 @@ fn resolve(path: &Path, windows: bool) -> Result<Launch, String> {
             "codex" => "@openai/codex",
             "claude" => "@anthropic-ai/claude-code",
             "opencode" => "opencode-ai",
+            "pi" => "@earendil-works/pi-coding-agent",
             _ => return Err(
                 "This batch launcher is unsupported. Select the native harness executable instead."
                     .into(),
@@ -425,6 +426,7 @@ mod tests {
         for (name, package) in [
             ("claude", "@anthropic-ai/claude-code"),
             ("opencode", "opencode-ai"),
+            ("pi", "@earendil-works/pi-coding-agent"),
         ] {
             let shim = f.file(&format!("node_modules/.bin/{name}.cmd"), "@echo off");
             f.file(

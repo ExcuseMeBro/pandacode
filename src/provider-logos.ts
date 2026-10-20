@@ -11,10 +11,12 @@ const logos: Record<ProviderId, string> = {
   antigravity: new URL('./assets/providers/antigravity.png', import.meta.url).href,
   grok: new URL('./assets/providers/grok.png', import.meta.url).href,
   mimo: new URL('./assets/providers/mimo.png', import.meta.url).href,
+  pi: '',
 };
 
 /** Decorative provider mark. The surrounding control supplies its accessible name. */
 export function providerLogo(id: ProviderId, cls = ''): string {
   if (!Object.hasOwn(logos, id)) return '';
+  if (id === 'pi') return `<span class="provider-logo${cls ? ` ${escape(cls)}` : ''}" data-provider="pi" aria-hidden="true">π</span>`;
   return `<img class="provider-logo${cls ? ` ${escape(cls)}` : ''}" data-provider="${id}" src="${escape(logos[id])}" width="20" height="20" alt="" aria-hidden="true" draggable="false">`;
 }

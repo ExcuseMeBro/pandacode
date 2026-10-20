@@ -75,6 +75,7 @@ const messages: Record<string, Message[]> = { 'session-1': [
   { id: 8, sessionId: 'session-1', role: 'tool', content: 'Tool finished', createdAt: now - 270000 },
 ], 'session-4': [{ id: 6, sessionId: 'session-4', role: 'assistant', content: 'The project is a small native workspace for coding agents.', createdAt: now - 259200000 }] };
 const providers: Provider[] = [
+  { id: 'pi', name: 'Pi', installed: true, path: '/sample/bin/pi', version: 'Sample provider', models: [] },
   { id: 'claude', name: 'Claude Code', installed: true, path: '/sample/bin/claude', version: 'Sample provider', models: ['sonnet', 'opus', 'haiku'].map(id => fallbackModel('claude', id)) },
   { id: 'codex', name: 'Codex', installed: true, path: '/sample/bin/codex', version: 'Sample provider', models: [] },
   { id: 'kimi', name: 'Kimi Code', installed: true, path: '/sample/bin/kimi', version: 'Sample provider', models: [] },
@@ -94,6 +95,7 @@ const previewMimoEndpoints = [
 let previewMimoEndpoint: string | null = null;
 // Representative catalog fixtures only; the native app queries installed harnesses.
 const catalogs: Record<ProviderId, ProviderModel[]> = {
+  pi: [{ id: 'anthropic/claude-sonnet-4-5', name: 'Claude Sonnet 4.5', description: 'Sample Pi model.', reasoningEfforts: [{ id: 'low', name: 'Low', description: '' }, { id: 'high', name: 'High', description: '' }], contextWindow: 200000 }],
   opencode: openCodePreviewModels,
   glm: [{ id: 'glm-4.7', name: 'GLM-4.7', description: 'Z.ai Coding Plan via Claude Code.' }],
   mimo: [

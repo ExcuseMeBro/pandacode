@@ -1,0 +1,42 @@
+export default async function (pi) {
+  const config = JSON.parse(process.env.PANDACODE_PI_BRIDGE);
+  const request = async (method, params, signal) => {
+    const response = await fetch(config.url, {
+      method: 'POST',
+      signal,
+      headers: { 'Content-Type': 'application/json', Authorization: config.authorization },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    });
+    if (!response.ok) throw new Error('PandaCode tools connection failed.');
+    const result = await response.json();
+    if (result.error) throw new Error(result.error.message);
+    return result.result;
+  };
+  const tools = config.url ? (await request('tools/list', {})).tools : [];
+  const names = new Set(tools.map(tool => tool.name));
+  for (const tool of tools) {
+    pi.registerTool({
+      name: tool.name,
+      label: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
+      async execute(_id, args, signal) {
+        const result = await request('tools/call', { name: tool.name, arguments: args }, signal);
+        if (result.isError) throw new Error(result.content.filter(item => item.type === 'text').map(item => item.text).join('\n'));
+        return result;
+      },
+    });
+  }
+  pi.on('session_start', (_event, ctx) => ctx.ui.setStatus('pandacode-bridge', 'ready'));
+  pi.on('tool_call', async (event, ctx) => {
+    if (names.has(event.toolName)) return;
+    if (['read', 'grep', 'find', 'ls'].includes(event.toolName)) return;
+    if (config.mode === 'plan') return { block: true, reason: 'This tool is unavailable in Plan mode.' };
+    if (config.mode === 'full') return;
+    if (config.mode === 'auto' && ['edit', 'write'].includes(event.toolName)) return;
+    try {
+      if (await ctx.ui.confirm(`Allow ${event.toolName}?`, JSON.stringify(event.input).slice(0, 4000))) return;
+    } catch {}
+    return { block: true, reason: 'Declined by the user.' };
+  });
+}

@@ -281,7 +281,7 @@ fn harness_arguments(context: &HarnessContext<'_>) -> Result<Vec<String>, String
     if provider == "antigravity" {
         return Err("Antigravity's ACP server does not have an interactive console. Use its synced commands in the composer, or open the agy CLI separately.".into());
     }
-    if !matches!(provider, "codex" | "claude" | "kimi" | "glm" | "opencode" | "grok" | "mimo") {
+    if !matches!(provider, "codex" | "claude" | "kimi" | "glm" | "opencode" | "grok" | "mimo" | "pi") {
         return Err("Choose a supported coding harness.".into());
     }
     if resume_id.is_some_and(|id| {
@@ -310,6 +310,9 @@ fn harness_arguments(context: &HarnessContext<'_>) -> Result<Vec<String>, String
         return Err("Choose a supported permission mode.".into());
     }
     match provider {
+        "pi" => {
+            if context.mode != "full" { return Err("Pi console requires Full access. Use task chat for approval modes.".into()); }
+        }
         "codex" => {
             let (sandbox, approval) = match context.mode {
                 "plan" => ("read-only", "never"),
@@ -390,6 +393,7 @@ fn harness_arguments(context: &HarnessContext<'_>) -> Result<Vec<String>, String
             ]),
             "claude" | "glm" | "mimo" => args.extend(["--effort".into(), effort.into()]),
             "grok" => args.extend(["--reasoning-effort".into(), effort.into()]),
+            "pi" => args.extend(["--thinking".into(), effort.into()]),
             _ => {} // The Kimi TUI restores its persisted thinking setting.
         }
     }

@@ -125,6 +125,9 @@ impl Server {
     pub(super) fn claude_config(&self) -> Value {
         json!({"mcpServers":{SERVER_NAME:{"type":"http","url":format!("http://{}/mcp",self.authority),"headers":{"Authorization":format!("Bearer {}",self.token)}}}})
     }
+    pub(super) fn pi_config(&self) -> Value {
+        json!({"url":format!("http://{}/mcp",self.authority),"authorization":format!("Bearer {}",self.token)})
+    }
     pub(super) fn kimi_config(&self) -> Value {
         json!({"type":"http","name":SERVER_NAME,"url":format!("http://{}/mcp",self.authority),"headers":[{"name":"Authorization","value":format!("Bearer {}",self.token)}]})
     }

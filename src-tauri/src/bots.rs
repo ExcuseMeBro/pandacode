@@ -211,7 +211,7 @@ fn validate(input: &BotInput) -> Result<BotInput> {
     if !crate::storage::valid_permission_mode(&input.mode) {
         return Err("Choose a permission mode for the bot.".into());
     }
-    let known = matches!(input.provider.as_str(), "claude" | "codex" | "kimi" | "opencode" | "glm" | "antigravity" | "grok" | "mimo");
+    let known = matches!(input.provider.as_str(), "claude" | "codex" | "kimi" | "opencode" | "glm" | "antigravity" | "grok" | "mimo" | "pi");
     if input.model.len() > 200 || !known {
         return Err("Choose a harness and model for the bot.".into());
     }

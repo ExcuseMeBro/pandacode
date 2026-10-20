@@ -12,6 +12,7 @@ try { previewPreferences = JSON.parse(localStorage.getItem('pandacode.overlay-pr
 function effectiveContext(): LaunchContext { return {...previewPreferences.context,...previewPreferences.modelSelection,mode:previewPreferences.context.mode ?? 'full'}; }
 // Preview fixtures only. Native catalogs come from the installed harnesses.
 const previewCatalogs: Record<ProviderId, ProviderModel[]> = {
+  pi:[{id:'anthropic/claude-sonnet-4-5',name:'Claude Sonnet 4.5',description:'Sample Pi model.'}],
   codex:[{id:'gpt-6-astra',name:'GPT-6-Astra',description:'Sample Codex model metadata.'},{id:'gpt-5.6-sol',name:'GPT-5.6-Sol',description:'Sample Codex model metadata.'}],
   claude:[{id:'sonnet',name:'Claude Sonnet 5',description:'Sample Claude Code model metadata.',contextWindow:200000},{id:'opus',name:'Claude Opus 5',description:'Sample Claude Code model metadata.'}],
   kimi:[{id:'kimi-code/k3',name:'K3',description:'Sample configured Kimi model.'}],
@@ -21,7 +22,7 @@ const previewCatalogs: Record<ProviderId, ProviderModel[]> = {
   grok:[{id:'grok-4.7',name:'Grok 4.7',description:'Sample Grok Build model.'}],
   mimo:[{id:'mimo-v2.6-pro',name:'MiMo-V2.6-Pro',description:'Sample MiMo Token Plan model.'}],
 };
-const previewProviders: Provider[] = (Object.entries({codex:'Codex',claude:'Claude Code',kimi:'Kimi Code',opencode:'OpenCode',glm:'GLM Coding Plan',antigravity:'Antigravity',grok:'Grok Build',mimo:'MiMo Token Plan'}) as [ProviderId,string][]).map(([id,name]) => ({id,name,installed:id !== 'antigravity',path:id === 'antigravity' ? null : `/sample/bin/${id}`,version:'Sample provider',models:[]}));
+const previewProviders: Provider[] = (Object.entries({codex:'Codex',claude:'Claude Code',kimi:'Kimi Code',opencode:'OpenCode',glm:'GLM Coding Plan',antigravity:'Antigravity',grok:'Grok Build',mimo:'MiMo Token Plan',pi:'Pi'}) as [ProviderId,string][]).map(([id,name]) => ({id,name,installed:id !== 'antigravity',path:id === 'antigravity' ? null : `/sample/bin/${id}`,version:'Sample provider',models:[]}));
 const tasks: OverlayTask[] = [
   {id:'preview-active', sessionId:'preview-active', kind:'task', title:'Polish the new onboarding', projectId:'preview-project', projectName:'PandaCode', provider:'codex', status:'running', updatedAt:Date.now()},
   {id:'preview-approval', sessionId:'preview-approval', kind:'task', title:'Build a responsive gallery', projectId:'preview-project', projectName:'PandaCode', provider:'claude', status:'waiting', updatedAt:Date.now()},
