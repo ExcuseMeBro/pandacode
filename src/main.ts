@@ -818,7 +818,8 @@ function renderNavigation(): void {
   const filterIcon = filtered ? projectAppIcon(filtered.id, filtered.name) : '';
   const shownIcon = filterLabel.previousElementSibling;
   if ((shownIcon?.outerHTML ?? '') !== filterIcon) { shownIcon?.remove(); if (filterIcon) filterLabel.insertAdjacentHTML('beforebegin', filterIcon); }
-  const visible = listedSessions().filter(s => s.archived === state.archived && !botProjects.has(s.projectId) && (!state.projectFilter || s.projectId === state.projectFilter) && s.title.toLowerCase().includes(state.query.toLowerCase()));
+  const sidebarSessions = listedSessions().filter(s => s.archived === state.archived && (state.archived || taskStage(s) !== 'completed') && !botProjects.has(s.projectId));
+  const visible = sidebarSessions.filter(s => (!state.projectFilter || s.projectId === state.projectFilter) && s.title.toLowerCase().includes(state.query.toLowerCase()));
   renderBots();
   $('#archive-toggle').classList.toggle('active', state.archived);
   $('#archive-toggle').setAttribute('aria-pressed', String(state.archived));
@@ -873,7 +874,7 @@ function renderNavigation(): void {
   const focused = nav.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
   const focusSelector = focused?.dataset.id ? `[data-id="${CSS.escape(focused.dataset.id)}"]` : focused?.dataset.action ? `[data-action="${CSS.escape(focused.dataset.action)}"]${focused.dataset.project ? `[data-project="${CSS.escape(focused.dataset.project)}"]` : ''}` : '';
   // Opening a project narrows the sidebar to it; say so, or the other tasks look lost.
-  const hidden = state.projectFilter ? listedSessions().filter(s => s.archived === state.archived && s.projectId !== state.projectFilter && !botProjects.has(s.projectId)).length : 0;
+  const hidden = state.projectFilter ? sidebarSessions.filter(s => s.projectId !== state.projectFilter).length : 0;
   // A one-line note pinned under the list, not a card inside it.
   const note = $('#sidebar-note');
   note.innerHTML = hidden && !state.archived ? `<button class="filter-note" data-action="show-all-projects" title="Show tasks from every project"><span>${hidden} more in other projects</span><strong>Show all</strong></button>` : '';

@@ -168,9 +168,12 @@ test.describe('project board', () => {
     expect(completed.taskStage).toBe('completed');
     expect(completed.completedAt).toBeGreaterThan(Date.now() - 10_000);
     expect(completed.archived).toBe(false);
+    await expect(page.locator(`.task-item[data-id="${task.id}"]`)).toHaveCount(0);
     await details(page).getByRole('button', { name: 'Reopen task', exact: true }).click();
     await expect(column(page, 'Review').getByRole('button', { name: `Open task: ${title}`, exact: true })).toBeVisible();
     expect(await savedTask(page, title)).toMatchObject({ taskStage: 'review', completedAt: null, archived: false });
+    await page.getByRole('button', { name: 'Conversation view', exact: true }).click();
+    await expect(page.locator(`.task-item[data-id="${task.id}"]`)).toBeVisible();
     expect((await calls(page, 'start_task')).length).toBe(1);
   });
 
@@ -324,19 +327,26 @@ test.describe('project board', () => {
     await installPreviewProbe(page, `
       for (const fixture of [
         { id: 'expired-board', title: 'Completed last week', taskStage: 'completed', completedAt: now - 604800001 },
-        { id: 'recent-board', title: 'Completed this week', taskStage: 'completed', completedAt: now - 601200000 },
+        { id: 'recent-board', title: 'Completed this week', taskStage: 'completed', completedAt: now - 601200000, pinned: true },
         { id: 'old-pending-board', title: 'Still pending after a week', taskStage: 'pending', completedAt: null }
       ]) sessions.push({ ...sessions[1], ...fixture, taskDescription: 'Saved task details', createdAt: now - 691200000, updatedAt: now - 691200000, lastResponseAt: null, archived: false });
     `);
     await page.reload();
+    await page.locator('#project-filter').click();
+    await page.getByRole('dialog', { name: 'Filter projects', exact: true }).getByRole('menuitemradio', { name: 'pandacode', exact: true }).click();
+    await expect(page.locator('#sidebar-note .filter-note')).toHaveText('4 more in other projectsShow all');
+    await page.locator('#sidebar-note .filter-note').click();
     await openBoard(page);
     await expect(card(page, 'Completed last week')).toHaveCount(0);
     await expect(column(page, 'Completed').getByRole('button', { name: 'Open task: Completed this week', exact: true })).toBeVisible();
     await expect(column(page, 'Pending').getByRole('button', { name: 'Open task: Still pending after a week', exact: true })).toBeVisible();
     expect(await savedTask(page, 'Completed last week')).toMatchObject({ archived: true, taskStage: 'completed' });
     expect(await savedTask(page, 'Completed this week')).toMatchObject({ archived: false, taskStage: 'completed' });
+    await expect(page.locator('.task-item[data-id="recent-board"]')).toHaveCount(0);
+    await expect(page.locator('.task-item[data-id="old-pending-board"]')).toHaveCount(1);
     await board(page).getByRole('button', { name: 'Archived tasks', exact: true }).click();
     await expect(card(page, 'Completed last week')).toBeVisible();
+    await expect(page.locator('.task-item[data-id="expired-board"]')).toHaveCount(1);
     await card(page, 'Completed last week').click();
     await expect(details(page)).toContainText('Saved task details');
   });
