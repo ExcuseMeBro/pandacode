@@ -3,6 +3,7 @@ mod acp;
 pub(crate) mod claude;
 mod codex;
 mod kimi;
+mod pi;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -340,7 +341,7 @@ async fn discover_catalog(provider: &str, cwd: &Path, key: Key, started: Instant
             "opencode" | "antigravity" | "grok" => acp::discover(provider, cwd).await,
             "codex" => codex::discover(cwd).await,
             "kimi" => kimi::discover(cwd).await,
-            "pi" => Ok(Catalog::default()),
+            "pi" => pi::discover(cwd).await,
             _ => unreachable!(),
         };
         let committed = CACHE

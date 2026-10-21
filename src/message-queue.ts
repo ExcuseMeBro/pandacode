@@ -22,9 +22,9 @@ export const HOLD_LABEL: Record<HoldReason, string> = {
   limited: 'Paused until the usage limit resets',
 };
 
-/** Harnesses whose running turn accepts a message: Claude Code stream input and Codex `turn/steer`. */
+/** Harnesses whose running turn accepts a message: Claude Code stream input, Codex `turn/steer` and Pi `steer`. */
 export function canSteer(provider: ProviderId): boolean {
-  return provider === 'claude' || provider === 'glm' || provider === 'mimo' || provider === 'codex';
+  return provider === 'claude' || provider === 'glm' || provider === 'mimo' || provider === 'codex' || provider === 'pi';
 }
 
 export interface QueueView {

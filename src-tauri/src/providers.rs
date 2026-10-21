@@ -441,7 +441,7 @@ pub fn validate_reasoning_effort(provider: &str, effort: Option<&str>) -> Result
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
         }
-        ("pi", Some(value)) => ["off", "minimal", "low", "medium", "high", "xhigh", "max"].contains(&value),
+        ("pi", Some(value)) => ["off", "minimal", "low", "medium", "high", "xhigh"].contains(&value),
         ("kimi", Some(value)) => ["on", "off"].contains(&value),
         _ => false,
     };
@@ -1016,7 +1016,7 @@ struct Protocol {
     claude_message_id: String,
     kimi_message_id: String,
     kimi_resume: bool,
-    pi_ready: bool,
+    pi: pi::State,
     // ACP may publish commands before session/new responds. Keep at most one
     // small frame until the response confirms which session owns it.
     early_kimi_commands: Option<Vec<u8>>,
@@ -1143,7 +1143,7 @@ impl Protocol {
             claude_message_id: String::new(),
             kimi_message_id: String::new(),
             kimi_resume: false,
-            pi_ready: false,
+            pi: pi::State::default(),
             early_kimi_commands: None,
             tools: HashMap::new(),
             file_write_tools: HashSet::new(),
@@ -2936,7 +2936,11 @@ async fn run_process_with_tools(
                         if line.len()>MAX_FRAME{return Err("Provider sent an oversized JSON message".into());}
                         if line.iter().all(u8::is_ascii_whitespace){continue;}
                         let value:Value=serde_json::from_slice(line).map_err(|e|format!("Invalid provider JSON: {e}"))?;
-                        if stopped { continue; }
+                        if stopped {
+                            // Pi stays up after `abort`; settling is the end of the stopped run.
+                            if protocol.config.provider=="pi" && value["type"]=="agent_settled" {return Ok(());}
+                            continue;
+                        }
                         let step=protocol.receive(value)?;
                         if apply_step(&mut protocol,step,&sink,&mut stdin,&mut jobs,&mut queued).await? {return Ok(());}
                     }

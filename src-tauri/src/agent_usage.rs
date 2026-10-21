@@ -336,6 +336,7 @@ fn cache() -> &'static HashMap<&'static str, CacheSlot> {
             "antigravity",
             "grok",
             "mimo",
+            "pi",
         ]
         .into_iter()
         .map(|id| (id, CacheSlot::default()))
@@ -554,6 +555,7 @@ async fn fetch_provider(provider: &str) -> Usage {
         "kimi" | "glm" | "opencode" | "antigravity" => crate::agent_usage_providers::fetch(provider).await,
         "grok" => Usage::empty(provider, "unsupported", "Grok does not expose subscription usage through this agent. Check your account dashboard."),
         "mimo" => Usage::empty(provider, "unsupported", "MiMo does not expose account limits through this agent. View your Token Plan dashboard."),
+        "pi" => Usage::empty(provider, "unsupported", "Pi uses the model provider you configured for it. Check that provider's dashboard for limits."),
         _ => Usage::empty(provider, "unsupported", "Usage limits are not available for this agent."),
     };
     if result.dashboard_url.is_none() {

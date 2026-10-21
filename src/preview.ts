@@ -75,7 +75,6 @@ const messages: Record<string, Message[]> = { 'session-1': [
   { id: 8, sessionId: 'session-1', role: 'tool', content: 'Tool finished', createdAt: now - 270000 },
 ], 'session-4': [{ id: 6, sessionId: 'session-4', role: 'assistant', content: 'The project is a small native workspace for coding agents.', createdAt: now - 259200000 }] };
 const providers: Provider[] = [
-  { id: 'pi', name: 'Pi', installed: true, path: '/sample/bin/pi', version: 'Sample provider', models: [] },
   { id: 'claude', name: 'Claude Code', installed: true, path: '/sample/bin/claude', version: 'Sample provider', models: ['sonnet', 'opus', 'haiku'].map(id => fallbackModel('claude', id)) },
   { id: 'codex', name: 'Codex', installed: true, path: '/sample/bin/codex', version: 'Sample provider', models: [] },
   { id: 'kimi', name: 'Kimi Code', installed: true, path: '/sample/bin/kimi', version: 'Sample provider', models: [] },
@@ -84,6 +83,7 @@ const providers: Provider[] = [
   { id: 'antigravity', name: 'Antigravity', installed: false, path: null, version: '', models: [] },
   { id: 'grok', name: 'Grok Build', installed: true, path: '/sample/bin/grok', version: 'grok 1.0.40 (sample)', models: [] },
   { id: 'mimo', name: 'MiMo Token Plan', installed: true, path: '/sample/bin/claude', version: 'Sample provider', models: [] },
+  { id: 'pi', name: 'Pi', installed: true, path: '/sample/bin/pi', version: 'Sample provider', models: [] },
 ];
 // Mirrors providers::mimo::ENDPOINTS; the native side is the authority.
 const previewMimoEndpoints = [

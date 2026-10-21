@@ -66,3 +66,42 @@ test('Pi app tools use authenticated MCP and report tool failures', async () => 
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+test('Pi removes the bridge token from the environment before any request', async () => {
+  process.env.PANDACODE_PI_BRIDGE = JSON.stringify({ mode: 'ask', url: 'http://127.0.0.1:9/mcp', authorization: 'Bearer secret' });
+  let seen;
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async () => { seen = process.env.PANDACODE_PI_BRIDGE; throw new Error('offline'); };
+  try {
+    await assert.rejects(extension({ registerTool: () => {}, on: () => {} }), /offline/);
+  } finally {
+    globalThis.fetch = fetch;
+  }
+  assert.equal(seen, undefined);
+  assert.equal(process.env.PANDACODE_PI_BRIDGE, undefined);
+});
+
+test('Pi plan mode blocks app tools except read-only ones; other modes keep app tools', async () => {
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ result: { tools: ['pandacode_dispatch_workers', 'pandacode_vm_exec', 'pandacode_list_tasks'].map(name => ({ name, inputSchema: {} })) } }) });
+  try {
+    for (const mode of ['plan', 'ask', 'auto', 'full']) {
+      process.env.PANDACODE_PI_BRIDGE = JSON.stringify({ mode, url: 'http://127.0.0.1:9/mcp', authorization: 'Bearer test' });
+      let hook;
+      await extension({ registerTool: () => {}, on: (name, handler) => { if (name === 'tool_call') hook = handler; } });
+      const ui = { confirm: async () => { throw new Error('app tools must not prompt here'); } };
+      for (const toolName of ['pandacode_dispatch_workers', 'pandacode_vm_exec']) {
+        const result = await hook({ toolName, input: {} }, { ui });
+        assert.equal(result?.block === true, mode === 'plan', `${mode} ${toolName}`);
+      }
+      assert.equal(await hook({ toolName: 'pandacode_list_tasks', input: {} }, { ui }), undefined);
+    }
+    // An allowlisted name that PandaCode did not register (a user MCP tool) is not trusted.
+    process.env.PANDACODE_PI_BRIDGE = JSON.stringify({ mode: 'plan' });
+    let hook;
+    await extension({ on: (name, handler) => { if (name === 'tool_call') hook = handler; } });
+    assert.equal((await hook({ toolName: 'pandacode_list_tasks', input: {} }, {})).block, true);
+  } finally {
+    globalThis.fetch = fetch;
+  }
+});

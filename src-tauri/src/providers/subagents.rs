@@ -300,7 +300,7 @@ impl Subagents {
     pub(super) fn route(&mut self, frame: &mut Value, protocol: &Protocol) -> Option<Step> {
         match protocol.config.provider.as_str() {
             "codex" => self.codex(frame, protocol),
-            "kimi" | "opencode" | "antigravity" | "grok" => None, // Kimi ACP subscribes to the main agent only; Agent results remain available.
+            "kimi" | "opencode" | "antigravity" | "grok" | "pi" => None, // Kimi ACP subscribes to the main agent only; Agent results remain available.
             _ => self.claude(frame, protocol),
         }
     }

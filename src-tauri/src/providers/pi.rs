@@ -1,3 +1,4 @@
+use super::goals::RpcReply;
 use super::*;
 use tokio::io::AsyncBufReadExt;
 
@@ -9,7 +10,10 @@ impl Bridge {
         server: Option<&mcp_host::Server>,
     ) -> Result<Self, String> {
         let directory = std::env::temp_dir().join(format!("pandacode-pi-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&directory).map_err(|e| e.to_string())?;
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder.create(&directory).map_err(|e| e.to_string())?;
         let bridge = Self(directory);
         let path = bridge.0.join("bridge.mjs");
         std::fs::write(&path, include_str!("pi-extension.mjs")).map_err(|e| e.to_string())?;
@@ -43,7 +47,9 @@ pub(super) fn configure(command: &mut Command, config: &RunConfig) {
         command.args(["--thinking", effort]);
     }
     if let Some(id) = &config.resume_id {
-        command.args(["--session", id]);
+        // `--session` may print and read a fork prompt on the RPC pipes when the
+        // ID matches another folder; `--session-id` only opens this folder's session.
+        command.args(["--session-id", id]);
     }
     if !config.instructions.is_empty() {
         command.args(["--append-system-prompt", &config.instructions]);
@@ -160,55 +166,27 @@ pub(super) async fn models(path: &Path) -> Result<Vec<ModelInfo>, String> {
     result
 }
 
+/// Pi run state. `agent_settled`, not `agent_end`, finishes a run: retries,
+/// compaction recovery and steering can follow an `agent_end`.
+#[derive(Default)]
+pub(super) struct State {
+    ready: bool,
+    /// `get_state` can answer before the bridge reports ready; it waits here.
+    held_state: Option<Value>,
+    /// Latest assistant failure. A successful retry or answer clears it.
+    error: Option<String>,
+    settled: bool,
+    steers: HashMap<String, RpcReply>,
+    steer_sequence: u64,
+}
+
+const MAX_PENDING_STEERS: usize = 16;
+
 impl Protocol {
     pub(super) fn pi(&mut self, value: Value) -> Result<Step, String> {
         let mut step = Step::default();
         match field(&value, "type") {
-            "response" => {
-                if value["success"] != true {
-                    return Err(short(field(&value, "error")));
-                }
-                match field(&value, "id") {
-                    "pandacode-init" => {
-                        if !self.pi_ready {
-                            return Err("Pi permission bridge did not initialize".into());
-                        }
-                        self.remote_id = string(&value["data"], "sessionId");
-                        if uuid::Uuid::parse_str(&self.remote_id).is_err() {
-                            return Err("Pi did not return a valid session ID".into());
-                        }
-                        step.events
-                            .push(self.event("session", self.remote_id.clone(), None));
-                        if self
-                            .config
-                            .reasoning_effort
-                            .as_deref()
-                            .is_some_and(|effort| {
-                                value["data"]["thinkingLevel"].as_str() != Some(effort)
-                            })
-                        {
-                            return Err("Pi did not apply the selected thinking level".into());
-                        }
-                        if let Some((provider, model)) = self.config.model.split_once('/') {
-                            if value["data"]["model"]["provider"] != provider
-                                || value["data"]["model"]["id"] != model
-                            {
-                                return Err("Pi did not apply the selected model".into());
-                            }
-                        }
-                        self.phase = 1;
-                        step.write.push(json!({"type":"prompt","id":"pandacode-prompt","message":self.config.prompt,"images":self.image_blocks}));
-                    }
-                    "pandacode-usage" => {
-                        let usage = &value["data"]["contextUsage"];
-                        if let Some(used) = usage["tokens"].as_u64() {
-                            self.usage(used, usage["contextWindow"].as_u64(), &mut step);
-                        }
-                        step.done = true;
-                    }
-                    _ => {}
-                }
-            }
+            "response" => self.pi_response(value, &mut step)?,
             "message_start" if value["message"]["role"] == "assistant" => {
                 self.claude_message_id = self.next_text_id();
             }
@@ -223,21 +201,25 @@ impl Protocol {
             }
             "message_end" if value["message"]["role"] == "assistant" => {
                 let message = &value["message"];
-                if message["stopReason"] == "error" {
-                    return Err(short(field(message, "errorMessage")));
+                match field(message, "stopReason") {
+                    // Pi may retry; agent_settled decides whether this failed the run.
+                    "error" => {
+                        self.pi.error = Some(short(field(message, "errorMessage")))
+                    }
+                    "aborted" => {}
+                    _ => {
+                        self.pi.error = None;
+                        let text = message["content"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|v| v["type"] == "text")
+                            .map(|v| field(v, "text"))
+                            .collect::<String>();
+                        let id = self.claude_message_id.clone();
+                        self.text_snapshot(&id, None, &text, &mut step);
+                    }
                 }
-                if message["stopReason"] == "aborted" {
-                    return Err("Pi response was aborted".into());
-                }
-                let text = message["content"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter(|v| v["type"] == "text")
-                    .map(|v| field(v, "text"))
-                    .collect::<String>();
-                let id = self.claude_message_id.clone();
-                self.text_snapshot(&id, None, &text, &mut step);
             }
             "tool_execution_start" => {
                 let name = field(&value, "toolName");
@@ -286,38 +268,183 @@ impl Protocol {
                     &mut step,
                 );
             }
-            "extension_ui_request" => match field(&value, "method") {
-                "setStatus"
-                    if value["statusKey"] == "pandacode-bridge"
-                        && value["statusText"] == "ready" =>
-                {
-                    self.pi_ready = true
-                }
-                "confirm" => self.approval(
-                    value.clone(),
-                    format!("{}\n{}", field(&value, "title"), field(&value, "message")),
-                    &mut step,
-                )?,
-                "select" | "input" | "editor" => step.write.push(
-                    json!({"type":"extension_ui_response","id":value["id"],"cancelled":true}),
+            "auto_retry_start" => step.events.push(self.event(
+                "status",
+                format!(
+                    "Retrying (attempt {} of {}): {}",
+                    value["attempt"],
+                    value["maxAttempts"],
+                    field(&value, "errorMessage")
                 ),
-                "notify" => step
-                    .events
-                    .push(self.event("status", field(&value, "message"), None)),
-                _ => {}
-            },
+                None,
+            )),
+            "auto_retry_end" => {
+                if value["success"] == true {
+                    self.pi.error = None;
+                } else if let Some(error) = value["finalError"].as_str() {
+                    self.pi.error = Some(short(error));
+                }
+            }
+            "compaction_start" => step
+                .events
+                .push(self.event("status", "Compacting context", None)),
+            "compaction_end" => {
+                if let Some(error) = value["errorMessage"].as_str() {
+                    step.events.push(
+                        self.event("status", format!("Context compaction failed: {error}"), None),
+                    );
+                } else if value["aborted"] != true {
+                    step.events
+                        .push(self.event("status", "Context compacted", None));
+                }
+            }
+            "agent_settled" => {
+                self.pi.settled = true;
+                if value["aborted"] == true {
+                    return Err("Pi response was aborted".into());
+                }
+                if let Some(error) = self.pi.error.take() {
+                    return Err(error);
+                }
+                step.write
+                    .push(json!({"type":"get_session_stats","id":"pandacode-usage"}));
+            }
+            "extension_ui_request" => self.pi_ui(value, &mut step)?,
+            // Only the permission bridge is required; other extensions fail on their own.
+            "extension_error" if !field(&value, "extensionPath").contains("pandacode-pi") => {
+                step.events.push(self.event(
+                    "status",
+                    format!("Pi extension error: {}", field(&value, "error")),
+                    None,
+                ))
+            }
             "extension_error" => {
                 return Err(format!(
                     "Pi extension failed: {}",
                     short(field(&value, "error"))
                 ))
             }
-            "agent_end" => step
-                .write
-                .push(json!({"type":"get_session_stats","id":"pandacode-usage"})),
             _ => {}
         }
         Ok(step)
+    }
+
+    fn pi_response(&mut self, value: Value, step: &mut Step) -> Result<(), String> {
+        let id = field(&value, "id");
+        if let Some(reply) = self.pi.steers.remove(id) {
+            let _ = reply.send(if value["success"] == true {
+                Ok(json!({"steered": true}))
+            } else {
+                Err(short(field(&value, "error")))
+            });
+            return Ok(());
+        }
+        if id == "pandacode-usage" {
+            // Stats are optional: a failed or unsupported request still ends the run.
+            let usage = &value["data"]["contextUsage"];
+            if let Some(used) = usage["tokens"].as_u64().filter(|_| value["success"] == true) {
+                self.usage(used, usage["contextWindow"].as_u64(), step);
+            }
+            step.done = true;
+            return Ok(());
+        }
+        if value["success"] != true {
+            return Err(short(field(&value, "error")));
+        }
+        match id {
+            "pandacode-init" if !self.pi.ready => self.pi.held_state = Some(value),
+            "pandacode-init" => self.pi_started(&value, step)?,
+            // An extension command consumed the prompt; no run started.
+            "pandacode-prompt" if value["data"]["disposition"] == "handled" => step.done = true,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn pi_started(&mut self, value: &Value, step: &mut Step) -> Result<(), String> {
+        let data = &value["data"];
+        self.remote_id = string(data, "sessionId");
+        if uuid::Uuid::parse_str(&self.remote_id).is_err() {
+            return Err("Pi did not return a valid session ID".into());
+        }
+        // `--session-id` creates an empty session when the saved one is missing.
+        if self.config.resume_id.is_some() && data["messageCount"] == 0 {
+            return Err("Pi could not find this task's saved session in this folder.".into());
+        }
+        step.events
+            .push(self.event("session", self.remote_id.clone(), None));
+        if self
+            .config
+            .reasoning_effort
+            .as_deref()
+            .is_some_and(|effort| data["thinkingLevel"].as_str() != Some(effort))
+        {
+            return Err("Pi did not apply the selected thinking level".into());
+        }
+        let model = &data["model"];
+        let applied = match self.config.model.split_once('/') {
+            Some((provider, id)) => model["provider"] == provider && model["id"] == id,
+            None => {
+                self.config.model.is_empty()
+                    || self.config.model == "default"
+                    || model["id"] == self.config.model.as_str()
+            }
+        };
+        if !applied {
+            return Err("Pi did not apply the selected model".into());
+        }
+        self.phase = 1;
+        step.write.push(json!({"type":"prompt","id":"pandacode-prompt","message":self.config.prompt,"images":self.image_blocks}));
+        Ok(())
+    }
+
+    fn pi_ui(&mut self, value: Value, step: &mut Step) -> Result<(), String> {
+        match field(&value, "method") {
+            "setStatus" if value["statusKey"] == "pandacode-bridge" => {
+                if value["statusText"] == "ready" {
+                    self.pi.ready = true;
+                    if let Some(state) = self.pi.held_state.take() {
+                        self.pi_started(&state, step)?;
+                    }
+                }
+            }
+            "confirm" => self.approval(
+                value.clone(),
+                format!("{}\n{}", field(&value, "title"), field(&value, "message")),
+                step,
+            )?,
+            // PandaCode's question form speaks Codex/MCP shapes; Pi dialogs decline for now.
+            "select" | "input" | "editor" => step.write.push(
+                json!({"type":"extension_ui_response","id":value["id"],"cancelled":true}),
+            ),
+            "notify" => step
+                .events
+                .push(self.event("status", field(&value, "message"), None)),
+            "setStatus" if !field(&value, "statusText").is_empty() => step
+                .events
+                .push(self.event("status", field(&value, "statusText"), None)),
+            // setTitle, setWidget and set_editor_text drive Pi's own terminal UI.
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub(super) fn pi_steer(&mut self, text: String, reply: RpcReply) -> Step {
+        let mut step = Step::default();
+        if self.phase == 0 || self.pi.settled {
+            let _ = reply.send(Err("The agent has no active turn to steer.".into()));
+            return step;
+        }
+        if self.pi.steers.len() >= MAX_PENDING_STEERS {
+            let _ = reply.send(Err("Too many steering messages are waiting.".into()));
+            return step;
+        }
+        self.pi.steer_sequence += 1;
+        let id = format!("pandacode-steer-{}", self.pi.steer_sequence);
+        step.write
+            .push(json!({"type":"steer","id":id,"message":text}));
+        self.pi.steers.insert(id, reply);
+        step
     }
 }
 
@@ -337,12 +464,14 @@ mod tests {
 
     #[test]
     fn bridge_must_be_ready_before_any_prompt() {
-        let mut missing = Protocol::new(super::super::tests::config("pi"));
-        assert!(missing
-            .receive(state())
-            .err()
-            .unwrap()
-            .contains("permission bridge"));
+        // get_state may answer before the bridge's ready status; it waits for it.
+        let mut early = Protocol::new(super::super::tests::config("pi"));
+        let held = early.receive(state()).unwrap();
+        assert!(held.write.is_empty() && held.events.is_empty());
+        assert_eq!(early.phase, 0);
+        let step = early.receive(json!({"type":"extension_ui_request","method":"setStatus","statusKey":"pandacode-bridge","statusText":"ready"})).unwrap();
+        assert_eq!(step.events[0].kind, "session");
+        assert_eq!(step.write[0]["type"], "prompt");
         let mut p = ready();
         p.image_blocks
             .push(json!({"type":"image","mimeType":"image/png","data":"image"}));
@@ -351,6 +480,77 @@ mod tests {
         assert_eq!(step.write[0]["type"], "prompt");
         assert_eq!(step.write[0]["images"][0]["data"], "image");
         assert_eq!(p.cancel()["type"], "abort");
+    }
+
+    #[test]
+    fn selected_models_are_verified_with_or_without_a_provider() {
+        let mut state = state();
+        state["data"]["model"] = json!({"provider":"anthropic","id":"sonnet"});
+        for (model, applied) in [("default", true), ("sonnet", true), ("anthropic/sonnet", true), ("opus", false), ("openai/sonnet", false)] {
+            let mut p = ready();
+            p.config.model = model.into();
+            assert_eq!(p.receive(state.clone()).is_ok(), applied, "{model}");
+        }
+    }
+
+    #[test]
+    fn resumed_sessions_must_exist_in_this_folder() {
+        let mut command = Command::new("pi");
+        let mut config = super::super::tests::config("pi");
+        config.resume_id = Some("01a15ba3-9096-76db-bd69-35168c0ecfa9".into());
+        configure(&mut command, &config);
+        let args: Vec<_> = command.as_std().get_args().map(|a| a.to_str().unwrap()).collect();
+        assert!(args.windows(2).any(|a| a == ["--session-id", "01a15ba3-9096-76db-bd69-35168c0ecfa9"]));
+        let mut p = Protocol::new(config);
+        p.pi.ready = true;
+        let mut empty = state();
+        empty["data"]["messageCount"] = json!(0);
+        assert!(p.receive(empty).err().unwrap().contains("saved session"));
+    }
+
+    #[test]
+    fn a_failed_turn_is_retried_before_settling() {
+        let mut p = ready();
+        p.receive(state()).unwrap();
+        p.receive(json!({"type":"message_start","message":{"role":"assistant"}})).unwrap();
+        let failed = p.receive(json!({"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"529 overloaded"}})).unwrap();
+        assert!(!failed.done);
+        let end = p.receive(json!({"type":"agent_end","messages":[],"willRetry":true})).unwrap();
+        assert!(end.write.is_empty(), "agent_end does not finish a run");
+        let retry = p.receive(json!({"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"529 overloaded"})).unwrap();
+        assert!(retry.events[0].text.contains("attempt 1 of 3"));
+        p.receive(json!({"type":"compaction_start","reason":"overflow"})).unwrap();
+        p.receive(json!({"type":"auto_retry_end","success":true,"attempt":2})).unwrap();
+        p.receive(json!({"type":"message_start","message":{"role":"assistant"}})).unwrap();
+        p.receive(json!({"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Done"}],"stopReason":"stop"}})).unwrap();
+        p.receive(json!({"type":"agent_end","messages":[],"willRetry":false})).unwrap();
+        let settled = p.receive(json!({"type":"agent_settled","aborted":false})).unwrap();
+        assert_eq!(settled.write[0]["type"], "get_session_stats");
+
+        let mut p = ready();
+        p.receive(state()).unwrap();
+        p.receive(json!({"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"529 overloaded"}})).unwrap();
+        p.receive(json!({"type":"auto_retry_end","success":false,"attempt":3,"finalError":"Still overloaded"})).unwrap();
+        assert_eq!(p.receive(json!({"type":"agent_settled","aborted":false})).err().unwrap(), "Still overloaded");
+        let mut p = ready();
+        p.receive(state()).unwrap();
+        assert!(p.receive(json!({"type":"agent_settled","aborted":true})).is_err());
+    }
+
+    #[test]
+    fn failed_stats_and_handled_prompts_still_finish() {
+        let mut p = ready();
+        p.receive(state()).unwrap();
+        p.receive(json!({"type":"agent_settled","aborted":false})).unwrap();
+        let end = p.receive(json!({"type":"response","command":"get_session_stats","id":"pandacode-usage","success":false,"error":"Unknown command"})).unwrap();
+        assert!(end.done);
+        assert!(end.events.is_empty());
+        let mut p = ready();
+        p.receive(state()).unwrap();
+        let started = p.receive(json!({"type":"response","command":"prompt","id":"pandacode-prompt","success":true,"data":{"disposition":"started"}})).unwrap();
+        assert!(!started.done);
+        let handled = p.receive(json!({"type":"response","command":"prompt","id":"pandacode-prompt","success":true,"data":{"disposition":"handled"}})).unwrap();
+        assert!(handled.done);
     }
 
     #[test]
@@ -390,8 +590,9 @@ mod tests {
         );
         let tool = p.receive(json!({"type":"tool_execution_end","toolCallId":"call","toolName":"write","result":{"content":[{"type":"text","text":"saved"}]},"isError":false})).unwrap();
         assert_eq!(tool.events[0].tool.as_ref().unwrap().status, "completed");
+        assert!(p.receive(json!({"type":"agent_end","messages":[]})).unwrap().write.is_empty());
         assert_eq!(
-            p.receive(json!({"type":"agent_end","messages":[]}))
+            p.receive(json!({"type":"agent_settled","aborted":false}))
                 .unwrap()
                 .write[0]["type"],
             "get_session_stats"
@@ -410,7 +611,10 @@ mod tests {
             p.approve(id, false).unwrap(),
             json!({"type":"extension_ui_response","id":"dialog","confirmed":false})
         );
-        assert!(p.receive(json!({"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"Rate limit"}})).err().unwrap().contains("Rate limit"));
+        p.receive(json!({"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"Rate limit"}})).unwrap();
+        assert!(p.receive(json!({"type":"agent_settled","aborted":false})).err().unwrap().contains("Rate limit"));
+        let dialog = p.receive(json!({"type":"extension_ui_request","id":"pick","method":"select","title":"Pick","options":["A"]})).unwrap();
+        assert_eq!(dialog.write[0], json!({"type":"extension_ui_response","id":"pick","cancelled":true}));
     }
 
     #[test]

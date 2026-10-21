@@ -164,7 +164,7 @@ test('provider connections expose all new harnesses and real GLM model names', a
   await expect(page.getByText('GLM-4.7', { exact: true }).first()).toBeVisible();
 });
 
-for (const providerId of ['claude', 'codex', 'kimi', 'opencode', 'glm', 'antigravity', 'grok', 'mimo']) {
+for (const providerId of ['claude', 'codex', 'kimi', 'opencode', 'glm', 'antigravity', 'grok', 'mimo', 'pi']) {
   test(`provider connections start ${providerId} tasks with Full access and retain explicit restrictions when switching`, async ({ page }) => {
     await page.addInitScript(provider => localStorage.setItem('pandacode.provider', provider), providerId);
     await page.route('**/src/preview.ts*', async route => {
@@ -199,6 +199,16 @@ for (const providerId of ['claude', 'codex', 'kimi', 'opencode', 'glm', 'antigra
     await expect.poll(readTask).toMatchObject({provider:next, mode:'full'});
   });
 }
+
+test('Pi offers four approval modes with Accept edits', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pandacode.provider', 'pi'));
+  await page.goto('/');
+  await page.locator('.new-task-button').click();
+  await page.locator('#mode-picker-trigger').click();
+  const items = page.getByRole('dialog', { name: 'Permissions', exact: true }).getByRole('menuitemradio');
+  await expect(items).toHaveCount(4);
+  await expect(items.filter({ hasText: 'Accept edits' })).toHaveCount(1);
+});
 
 test('settings organization supports Pi models and executable settings', async ({ page }) => {
   await page.goto('/');

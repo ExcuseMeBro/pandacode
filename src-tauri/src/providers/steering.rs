@@ -1,6 +1,7 @@
 //! Steering: a message for an agent while its turn is running. Claude Code takes
 //! it on stream input at the next tool boundary (or as a following turn); Codex
-//! takes it through `turn/steer` on the active turn. Other harnesses decline, and
+//! takes it through `turn/steer` on the active turn; Pi through its `steer` command,
+//! delivered before its next model call. Other harnesses decline, and
 //! the app keeps the message queued for after the turn instead.
 
 use super::goals::{Purpose, RpcReply};
@@ -54,6 +55,9 @@ impl Protocol {
             let _ = self.goal_request("turn/steer", params, Purpose::Rpc(reply), &mut step);
             return step;
         }
+        if self.config.provider == "pi" {
+            return self.pi_steer(text, reply);
+        }
         let _ = reply.send(Err("This agent cannot be steered mid-turn; the message stays queued.".into()));
         step
     }
@@ -100,6 +104,33 @@ mod tests {
             p.receive(json!({"type":"user","isReplay":true,"message":{"role":"user","content":[{"type":"text","text":text}]}})).unwrap();
         }
         assert!(p.receive(json!({"type":"result","subtype":"success","result":"ok"})).unwrap().done);
+    }
+
+    #[test]
+    fn pi_steers_the_running_turn_and_reports_the_reply() {
+        let mut idle = Protocol::new(config("pi"));
+        let (step, mut reply) = steer(&mut idle, "too early");
+        assert!(step.write.is_empty());
+        assert!(reply.try_recv().unwrap().is_err());
+
+        let mut p = Protocol::new(config("pi"));
+        p.phase = 1;
+        let (step, mut accepted) = steer(&mut p, " check the docs ");
+        assert_eq!(step.write[0]["type"], "steer");
+        assert_eq!(step.write[0]["message"], "check the docs");
+        let id = step.write[0]["id"].as_str().unwrap().to_owned();
+        let (step, mut refused) = steer(&mut p, "second");
+        let refused_id = step.write[0]["id"].clone();
+        p.receive(json!({"type":"response","command":"steer","id":id,"success":true,"data":{"disposition":"queued"}})).unwrap();
+        assert!(accepted.try_recv().unwrap().is_ok());
+        // A refused steer stays queued in the app and never fails the run.
+        let step = p.receive(json!({"type":"response","command":"steer","id":refused_id,"success":false,"error":"Not streaming"})).unwrap();
+        assert!(!step.done);
+        assert!(refused.try_recv().unwrap().is_err());
+        p.receive(json!({"type":"agent_settled","aborted":false})).unwrap();
+        let (step, mut late) = steer(&mut p, "after settling");
+        assert!(step.write.is_empty());
+        assert!(late.try_recv().unwrap().is_err());
     }
 
     #[test]

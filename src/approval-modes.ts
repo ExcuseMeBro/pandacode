@@ -8,6 +8,8 @@ export function approvalModes(provider: ProviderId): ApprovalMode[] {
     ? 'Work in this project. Ask you when an action needs extra permission.'
     : provider === 'grok'
     ? 'Grok asks before edits and commands, whatever its own config says.'
+    : provider === 'pi'
+    ? 'Pi has no approval system; PandaCode asks before edits, commands and other non-read tools.'
     : 'Use the harness’s normal rules. Ask you when approval is needed.' };
   const full: ApprovalMode = { id: 'full', label: 'Full access', icon: 'unlock', description: provider === 'antigravity'
     ? 'Automatically approve permission requests. Server restrictions still apply.'
@@ -15,8 +17,10 @@ export function approvalModes(provider: ProviderId): ApprovalMode[] {
     ? 'Skip approval prompts and sandbox limits. Allow file and network access.'
     : provider === 'grok'
     ? 'Always approve: Grok runs every tool without asking (its --always-approve).'
+    : provider === 'pi'
+    ? 'Pi runs every tool without asking.'
     : 'Run tools without approval prompts, including outside this project.' };
-  return [standard, ['claude', 'glm', 'mimo', 'opencode', 'grok'].includes(provider)
+  return [standard, ['claude', 'glm', 'mimo', 'opencode', 'grok', 'pi'].includes(provider)
     ? { id: 'auto', label: 'Accept edits', icon: 'edit', description: 'Allow file edits automatically. Other actions may still ask you.' }
     : provider === 'kimi'
     ? { id: 'auto', label: 'Ask when needed', icon: 'spark', description: 'Allow routine tools automatically. Ask you about sensitive actions.' }
@@ -26,6 +30,8 @@ export function approvalModes(provider: ProviderId): ApprovalMode[] {
     ? { id: 'plan', label: 'Read only', icon: 'plan', description: 'Inspect the project. Block writes and permission escalation.' }
     : provider === 'grok'
     ? { id: 'plan', label: 'Plan mode', icon: 'plan', description: 'Read-only: Grok investigates and proposes a plan; edits and commands are declined.' }
+    : provider === 'pi'
+    ? { id: 'plan', label: 'Plan mode', icon: 'plan', description: 'Read-only: Pi may use read-only tools; everything else is declined.' }
     : { id: 'plan', label: 'Plan mode', icon: 'plan', description: 'Explore and plan changes before implementation.' }, full];
 }
 

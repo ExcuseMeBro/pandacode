@@ -51,6 +51,12 @@ reviewer and sandbox settings on thread start/resume and each turn. Kimi must
 advertise the required ACP mode and acknowledge `session/set_mode` before the
 prompt is sent.
 
+Pi has no native approval system, so a PandaCode extension enforces the modes
+in Pi's RPC session: Standard asks before edits, commands and other non-read
+tools; Accept edits allows edit/write and asks for the rest; Plan mode allows
+read-only tools and declines everything else; Full access runs every tool without
+asking.
+
 Kimi's actual mode behaviour is verified against its installed engine source:
 `default` is manual, `yolo` auto-approves routine operations, and `auto` is fully
 unattended. Its ACP mode descriptions can lag behind those engine semantics, so

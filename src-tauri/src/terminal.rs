@@ -900,6 +900,26 @@ mod tests {
         }
     }
     #[test]
+    fn pi_console_requires_full_access_and_takes_thinking_and_resume() {
+        let context = HarnessContext {
+            session_id: "task",
+            provider: "pi",
+            resume_id: Some("01a15ba3-9096-76db-bd69-35168c0ecfa9"),
+            model: Some("anthropic/sonnet"),
+            reasoning_effort: Some("xhigh"),
+            mode: "full",
+        };
+        let args = harness_arguments(&context).unwrap();
+        // The TUI may offer to fork a session from another folder, so it takes `--session`.
+        assert_eq!(&args[..2], &["--session", "01a15ba3-9096-76db-bd69-35168c0ecfa9"]);
+        assert!(args.windows(2).any(|args| args == ["--model", "anthropic/sonnet"]));
+        assert!(args.windows(2).any(|args| args == ["--thinking", "xhigh"]));
+        for mode in ["ask", "auto", "plan"] {
+            assert!(harness_arguments(&HarnessContext { mode, ..context }).unwrap_err().contains("Full access"));
+        }
+        assert!(harness_arguments(&HarnessContext { reasoning_effort: Some("max"), ..context }).is_err());
+    }
+    #[test]
     fn harness_console_explicitly_preserves_restricted_permissions() {
         let context = HarnessContext {
             session_id: "task",
